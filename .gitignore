@@ -1,0 +1,12 @@
+# Essentiel
+node_modules/
+.env*
+*.log
+uploads/
+*.sqlite
+.DS_Store
+
+# Optionnel selon votre setup
+dist/
+coverage/
+.vscode/
