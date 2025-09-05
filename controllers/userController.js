@@ -498,9 +498,34 @@ const getUserProfile = asyncHandler(async (req, res) => {
 
   if (user) {
     res.json({
+
+
       _id: user._id,
       nom: user.nom,
+      prenom: user.prenom,
+      pseudo: user.pseudo,
+      cin: user.cin,
       email: user.email,
+      tel: user.tel,
+      points: user.points,
+      allpoints: user.allpoints,
+      pointstosend: user.pointstosend,
+      role: user.role,
+      createdAt: user.createdAt,
+      lastLogin: formatDate(user.lastLogin),
+      previousLastLogin: formatDate(previousLastLogin),
+      // Comptes par génération
+      firstGenUserCount: firstGenUsers.length,
+      secondGenUserCount: secondGenUsers.length,
+      thirdGenUserCount: thirdGenUsers.length,
+      fourthGenUserCount: fourthGenUsers.length,
+      fifthGenUserCount: fifthGenUsers.length,
+      sixthGenUserCount: sixthGenUsers.length,
+
+
+
+
+
     });
   } else {
     res.status(404);

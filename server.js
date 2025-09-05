@@ -15,7 +15,7 @@ connectDB();
 const app = express();
 const corsOptions = {
 
-  origin: ["http://localhost:10000", "https://big_money_business.surge.sh"], // your frontend URL
+  origin: "https://bmbclients.netlify.app", // ton front Netlify
 
   credentials: true, // This allows cookies to be sent
 };
