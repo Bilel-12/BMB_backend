@@ -495,45 +495,18 @@ const logoutUser = asyncHandler(async (req, res) => {
 
 const getUserProfile = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id);
-  const formatDate = (date) =>
-    date
-      ? date.toLocaleString("en-GB", {
-        hour: "2-digit",
-        minute: "2-digit",
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-      })
-      : null;
+
   if (user) {
     res.json({
-
 
       _id: user._id,
       nom: user.nom,
       prenom: user.prenom,
       pseudo: user.pseudo,
-      cin: user.cin,
-      email: user.email,
-      tel: user.tel,
+
       points: user.points,
       allpoints: user.allpoints,
       pointstosend: user.pointstosend,
-      role: user.role,
-      createdAt: user.createdAt,
-      lastLogin: formatDate(user.lastLogin),
-      previousLastLogin: formatDate(previousLastLogin),
-      // Comptes par génération
-      firstGenUserCount: firstGenUsers.length,
-      secondGenUserCount: secondGenUsers.length,
-      thirdGenUserCount: thirdGenUsers.length,
-      fourthGenUserCount: fourthGenUsers.length,
-      fifthGenUserCount: fifthGenUsers.length,
-      sixthGenUserCount: sixthGenUsers.length,
-
-
-
-
 
     });
   } else {
