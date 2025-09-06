@@ -515,39 +515,28 @@ const getUserProfile = asyncHandler(async (req, res) => {
   }
 });
 
-// const updateUserProfile = asyncHandler(async (req, res) => {
-//   const user = await User.findById(req.user._id);
-//   if (user) {
-//     user.nom = req.body.nom || user.nom;
-//     user.prenom = req.body.prenom || user.prenom;
-//     user.email = req.body.email || user.email;
-//     user.pseudo = req.body.pseudo || user.pseudo;
-//     user.tel = req.body.tel || user.tel;
-//     user.parent = req.body.parent || user.parent;
-//     user.leftChild = req.body.leftChild || user.leftChild;
-//     user.rightChild = req.body.rightChild || user.rightChild;
-//     user.position = req.body.position || user.position;
-//     user.password = req.body.password || user.password;
 
-//     if (req.body.password) {
-//       user.password = req.body.password;
-//     }
 
-//     const updatedUser = await user.save();
+const getUserPoints = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.params.id);
 
-//     res.json({
-//       _id: updatedUser._id,
-//       nom: updatedUser.nom,
-//       prenom: updatedUser.prenom,
-//       email: updatedUser.email,
-//       tel: updatedUser.tel,
-//       password: updatedUser.password,
-//     });
-//   } else {
-//     res.status(404);
-//     throw new Error("لم يتم العثور على المستخدم");
-//   }
-// });
+  if (user) {
+    res.json({
+      _id: user._id,
+      nom: user.nom,
+      email: user.email,
+      points: user.points,
+      allpoints: user.allpoints,
+      pointstosend: user.pointstosend,
+      prenom: user.prenom,
+
+      pseudo: user.pseudo,
+    });
+  } else {
+    res.status(404);
+    throw new Error("لم يتم العثور على المستخدم");
+  }
+});
 const updateUserProfile = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id);
   if (user) {
@@ -586,6 +575,7 @@ module.exports = {
   updateTotalIncome,
   getNotifications,
   transferPoints,
-  getTreeStats
+  getTreeStats,
+  getUserPoints
 };
 
