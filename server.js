@@ -15,7 +15,7 @@ connectDB();
 const app = express();
 const corsOptions = {
 
-  origin: "https://bmb-ten.vercel.app/", // ton front Netlify
+  origin: "https://bmb-ten.vercel.app", // ton front Netlify
 
   credentials: true, // This allows cookies to be sent
 };
