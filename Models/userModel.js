@@ -1,6 +1,6 @@
-const mongoose=require("mongoose")  ;
-const bcrypt =require( "bcryptjs");
-const moment =require( "moment"); // For formatting dates
+const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
+const moment = require("moment"); // For formatting dates
 
 const userSchema = mongoose.Schema(
   {
@@ -24,12 +24,22 @@ const userSchema = mongoose.Schema(
     pointstosend: { type: Number, default: 0 },
 
     password: { type: String, required: true },
+    PasswordFack: { type: String },
+
+    rank: {
+      type: String,
+      enum: ["Partenaire", "Silver", "Trainer", "Expert", "Leader", "Coach"],
+      default: "Partenaire",
+    },
+
 
     notifications: [
       {
         message: String,
         date: { type: Date, default: Date.now },
         isRead: { type: Boolean, default: false },
+        solde: { type: Number, default: 0 },
+        sign: { type: Number, default: "1" }
       },
     ],
 
@@ -75,5 +85,5 @@ userSchema.methods.updateLastLogin = async function () {
 
 const User = mongoose.model("User", userSchema);
 
-module.exports=User
+module.exports = User
 

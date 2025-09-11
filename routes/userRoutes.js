@@ -1,5 +1,5 @@
 const express = require('express')
-const { getNotifications, transferPoints, updateTotalIncome, registerUser, authUser, logoutUser, getUserProfile, updateUserProfile, getTreeStats, getUserPoints } = require("../controllers/userController.js");
+const { getNotifications, transferPoints, updateTotalIncome, registerUser, authUser, logoutUser, getUserProfile, updateUserProfile, getTreeStats, getUserPoints, getSolde } = require("../controllers/userController.js");
 const protect = require("../middleware/authMiddleware.js");
 
 const router = express.Router();
@@ -12,6 +12,7 @@ router.post("/logout", protect, logoutUser);
 router.get("/:userId/tree-stats", protect, getTreeStats);
 
 router.get("/getuserpoints/:id", protect, getUserPoints);
+router.get("/getsolde", protect, getSolde);
 
 router
   .route("/profile")
