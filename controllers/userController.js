@@ -1,5 +1,7 @@
 const asyncHandler = require("express-async-handler");
 const generateToken = require("../utils/generateToken.js");
+const bcrypt = require("bcryptjs");
+
 const User = require("../Models/userModel.js");
 const { default: mongoose } = require("mongoose");
 const { sign } = require("jsonwebtoken");
@@ -13,12 +15,7 @@ const authUser = asyncHandler(async (req, res) => {
     throw new Error("خطأ في إسم الحساب أو كلمة السر");
   }
 
-  // recalcul des points pour cet utilisateur
-  // if (user.parent) {
-  //   await updateParentPoints(user.parent);
-  // } else {
-  //   await updateParentPoints(user._id); // si c’est la racine
-  // }
+
 
   const previousLastLogin = user.lastLogin;
   user.lastLogin = new Date();
@@ -50,8 +47,6 @@ const authUser = asyncHandler(async (req, res) => {
   const fifthGenUsers = await getChildren(fourthGenIds);
   const fifthGenIds = fifthGenUsers.map(u => u._id);
 
-  // 6ème génération
-  const sixthGenUsers = await getChildren(fifthGenIds);
 
   // Formater les dates de connexion
   const formatDate = (date) =>
@@ -75,6 +70,7 @@ const authUser = asyncHandler(async (req, res) => {
     cin: user.cin,
     email: user.email,
     tel: user.tel,
+    password: user.password,
     // points: user.points,
     allpoints: user.allpoints,
     pointstosend: user.pointstosend,
@@ -88,12 +84,10 @@ const authUser = asyncHandler(async (req, res) => {
     thirdGenUserCount: thirdGenUsers.length,
     fourthGenUserCount: fourthGenUsers.length,
     fifthGenUserCount: fifthGenUsers.length,
-    sixthGenUserCount: sixthGenUsers.length,
+
   });
 });
 
-
-// controllers/tonController.js (remplace seulement registerUser)
 
 const registerUser = asyncHandler(async (req, res) => {
   const {
@@ -163,7 +157,7 @@ const registerUser = asyncHandler(async (req, res) => {
     createdBy: connectedUser.pseudo,
     parent: parent ? parent._id : null,
     position: parent ? position : null,
-    points: 45,
+    points: 0,
     allpoints: 0,
     pointstosend: 0,
     role: userRole,
@@ -173,9 +167,10 @@ const registerUser = asyncHandler(async (req, res) => {
 
   // 5) Mise à jour des points dès la création
   if (newUser.parent) {
-    await updateAncestorsPoints(newUser._id); // recalcul toute la lignée ascendante
-  } else {
-    await updateParentPoints(newUser._id); // si c’est la racine
+    await updateAncestorsPoints(newUser._id);
+  }
+  else {
+    await updateParentPoints(newUser._id);
   }
 
   // 6) Transférer 150 points vers l’admin
@@ -205,56 +200,67 @@ const registerUser = asyncHandler(async (req, res) => {
   });
 });
 
-async function updateAncestorsPoints(userId) {
-  let current = await User.findById(userId);
-
-  while (current && current.parent) {
-    await updateParentPoints(current.parent);
-    current = await User.findById(current.parent);
-  }
-}
 
 
-// Fonction récursive pour calculer les points et descendants
 
 async function updateParentPoints(parentId) {
   const parent = await User.findById(parentId);
   if (!parent) return;
 
-  async function calculateBalancedPoints(userId) {
-    // Récupérer tous les enfants directs
+
+  async function calculateCounts(userId, generation = 1, maxGen = 5) {
+
+    if (generation > maxGen) return { leftCount: 0, rightCount: 0 };
+
     const leftChildren = await User.find({ parent: userId, position: "left" }).select("_id");
     const rightChildren = await User.find({ parent: userId, position: "right" }).select("_id");
 
     let leftCount = 0;
     let rightCount = 0;
 
-    // Compter récursivement les descendants à gauche
     for (const child of leftChildren) {
-      const childResult = await calculateBalancedPoints(child._id);
-      leftCount += 1 + childResult.leftCount + childResult.rightCount; // 1 = l'enfant lui-même
+      if (generation < maxGen) {
+        const childRes = await calculateCounts(child._id, generation + 1, maxGen);
+
+        leftCount += 1 + childRes.leftCount + childRes.rightCount;
+      } else {
+        leftCount += 1;
+      }
     }
 
-    // Compter récursivement les descendants à droite
     for (const child of rightChildren) {
-      const childResult = await calculateBalancedPoints(child._id);
-      rightCount += 1 + childResult.leftCount + childResult.rightCount;
+      if (generation < maxGen) {
+        const childRes = await calculateCounts(child._id, generation + 1, maxGen);
+        rightCount += 1 + childRes.leftCount + childRes.rightCount;
+      } else {
+        rightCount += 1;
+      }
     }
 
-    // Points équilibrés = 90 * min(nombre total gauche, nombre total droite)
-    const points = 90 * Math.min(leftCount, rightCount);
-
-    // Sauvegarder l'utilisateur avec ses points
-    const user = await User.findById(userId);
-    user.points = points;
-    await user.save();
-
-    return { leftCount, rightCount }; // ne retourne pas de totalPoints
+    return { leftCount, rightCount };
   }
 
-  await calculateBalancedPoints(parent._id);
+
+  const { leftCount, rightCount } = await calculateCounts(parent._id, 1, 5);
+
+
+  const points = 90 * Math.min(leftCount, rightCount);
+
+
+  parent.points = points;
+  await parent.save();
 
   return parent.points;
+}
+
+async function updateAncestorsPoints(userId) {
+
+  let current = await User.findById(userId);
+
+  while (current && current.parent) {
+    await updateParentPoints(current.parent);
+    current = await User.findById(current.parent);
+  }
 }
 
 
@@ -357,35 +363,67 @@ const getSolde = asyncHandler(async (req, res) => {
 });
 
 
+
+
+
+
 const transferPoints = asyncHandler(async (req, res) => {
-  const { senderPseudo, recipientId, pointsToTransfer, password } = req.body;
+  const { senderPseudo, recipientId, pointsToTransfer, pointsToSending, password } = req.body;
 
+  // 🔹 Trouver expéditeur et destinataire
   const sender = await User.findOne({ pseudo: senderPseudo });
-  if (!sender) return res.status(404).json({ message: "Sender not found" });
+  const recipient = await User.findById(recipientId);
 
+  if (!sender || !recipient) {
+    return res.status(404).json({ message: "Sender or recipient not found" });
+  }
+
+  // 🔹 Vérifier mot de passe
   const isPasswordMatch = await sender.matchPassword(password);
-  if (!isPasswordMatch) return res.status(401).json({ message: "Incorrect password" });
+  if (!isPasswordMatch) {
+    return res.status(401).json({ message: "Incorrect password" });
+  }
 
-  // Vérifier solde réel disponible (points + transferts déjà reçus)
-  const totalTransfer = sender.notifications.reduce((acc, notif) => acc + notif.solde * notif.sign, 0);
-  const soldeDispo = sender.points + totalTransfer;
-  if (soldeDispo < pointsToTransfer) {
+  // 🔹 Calcul du solde réel dispo = points + somme des mouvements en notifications
+  // const totalTransfer = sender.notifications.reduce((acc, notif) => acc + (notif.solde || 0) * (notif.sign || 1), 0);
+  // const soldeDispo = sender.points + totalTransfer;
+
+
+  const totalTransfer = sender.notifications.reduce((acc, notif) => {
+    return acc + (notif.solde * notif.sign);
+  }, 0);
+  const solde = totalTransfer + sender.points;
+  if (solde < pointsToTransfer) {
     return res.status(400).json({ message: "رصيدك غير كافٍ لإتمام العملية!" });
   }
 
-  // Ajouter notification au sender (débit)
+  // 🔹 Déduire des soldes existants (priorité à pointstosend comme avant)
+  let remainingToDeduct = pointsToTransfer;
+
+  if (sender.pointstosend >= remainingToDeduct) {
+    sender.pointstosend -= remainingToDeduct;
+    remainingToDeduct = 0;
+  } else {
+    remainingToDeduct -= sender.pointstosend;
+    sender.pointstosend = 0;
+  }
+
+  if (remainingToDeduct > 0) {
+    sender.points -= remainingToDeduct;
+  }
+
+  // 🔹 Ajouter points au destinataire
+  // recipient.points += pointsToTransfer;
+  recipient.pointstosend += pointsToSending;
+
+  // 🔹 Ajouter notifications avec solde/sign comme ta 2ᵉ API
   sender.notifications.push({
-    message: `لقد أرسلت ${pointsToTransfer} نقطة.`,
+    message: `لقد أرسلت ${pointsToTransfer} نقطة إلى ${recipient.pseudo || "utilisateur"}.`,
     date: new Date(),
     isRead: false,
     solde: pointsToTransfer,
     sign: -1,
   });
-  await sender.save();
-
-  // Ajouter notification au recipient (crédit)
-  const recipient = await User.findById(recipientId);
-  if (!recipient) return res.status(404).json({ message: "Recipient not found" });
 
   recipient.notifications.push({
     message: `${senderPseudo} أرسل إليك ${pointsToTransfer} نقطة.`,
@@ -394,241 +432,15 @@ const transferPoints = asyncHandler(async (req, res) => {
     solde: pointsToTransfer,
     sign: 1,
   });
+
+  // 🔹 Sauvegarder
+  await sender.save();
   await recipient.save();
 
   res.status(200).json({ message: "✅ Points transferred successfully" });
 });
 
 
-
-
-
-
-// const transferPoints = asyncHandler(async (req, res) => {
-//   const {
-//     senderPseudo,
-//     recipientId,
-//     pointsToTransfer,
-//     pointsToSending,
-//     password,
-//   } = req.body;
-
-//   // 1️⃣ Conversion des points en nombres
-//   const ptsTransfer = Number(pointsToTransfer);
-//   const ptsSending = Number(pointsToSending);
-
-//   if (isNaN(ptsTransfer) || isNaN(ptsSending) || ptsTransfer <= 0) {
-//     return res.status(400).json({ message: "Points invalides" });
-//   }
-
-//   // 2️⃣ Trouver l’expéditeur et le destinataire
-//   const sender = await User.findOne({ pseudo: senderPseudo });
-//   const recipient = await User.findById(recipientId);
-
-//   if (!sender || !recipient) {
-//     return res.status(404).json({ message: "Expéditeur ou destinataire introuvable" });
-//   }
-
-//   // 3️⃣ Vérifier le mot de passe
-//   const isPasswordMatch = await sender.matchPassword(password);
-//   if (!isPasswordMatch) {
-//     return res.status(401).json({ message: "Mot de passe incorrect" });
-//   }
-
-//   // 4️⃣ Vérifier le solde disponible
-//   if (sender.points < ptsTransfer) {
-//     return res.status(400).json({ message: "رصيدك غير كافٍ لإتمام العملية!" });
-//   }
-
-//   // 5️⃣ Démarrer une transaction MongoDB
-//   const session = await mongoose.startSession();
-//   session.startTransaction();
-
-//   try {
-//     // Déduire les points de l’expéditeur
-//     sender.points -= ptsTransfer;
-
-//     // Ajouter les points au destinataire
-//     recipient.points += ptsTransfer;
-//     recipient.pointstosend += ptsSending;
-
-//     // Notifications
-//     recipient.notifications.push({
-//       message: `${senderPseudo} أرسل إليك ${ptsTransfer} نقطة.`,
-//       date: new Date(),
-//       isRead: false,
-//     });
-
-//     sender.notifications.push({
-//       message: `لقد أرسلت ${ptsTransfer} نقطة إلى ${recipient.pseudo || "a user"}.`,
-//       date: new Date(),
-//       isRead: false,
-//     });
-
-//     // Sauvegarder expéditeur et destinataire dans la transaction
-//     await sender.save({ session });
-//     await recipient.save({ session });
-
-//     // Mettre à jour les points du parent de l’expéditeur
-//     if (sender.parent) {
-//       await updateParentPoints(sender.parent);
-//     }
-
-//     // Commit transaction
-//     await session.commitTransaction();
-//     session.endSession();
-
-//     res.status(200).json({ message: "Points transférés avec succès" });
-//   } catch (error) {
-//     // En cas d’erreur, rollback
-//     await session.abortTransaction();
-//     session.endSession();
-//     res.status(500).json({ message: "Erreur lors du transfert", error: error.message });
-//   }
-// });
-
-
-// const transferPoints = asyncHandler(async (req, res) => {
-//   const {
-//     senderPseudo,
-//     recipientId,
-//     pointsToTransfer,
-//     pointsToSending,
-//     password,
-//   } = req.body;
-
-//   // 1️⃣ Trouver l’expéditeur et le destinataire
-//   const sender = await User.findOne({ pseudo: senderPseudo });
-//   const recipient = await User.findById(recipientId);
-
-//   if (!sender || !recipient) {
-//     return res.status(404).json({ message: "Sender or recipient not found" });
-//   }
-
-//   // 2️⃣ Vérifier le mot de passe
-//   const isPasswordMatch = await sender.matchPassword(password);
-//   if (!isPasswordMatch) {
-//     return res.status(401).json({ message: "Incorrect password" });
-//   }
-
-//   // 3️⃣ Vérifier le solde disponible (seulement points)
-//   if (sender.points < pointsToTransfer) {
-//     return res.status(400).json({ message: "رصيدك غير كافٍ لإتمام العملية!" });
-//   }
-
-//   // 4️⃣ Déduire les points de l’expéditeur
-//   sender.points -= pointsToTransfer;
-
-//   // 5️⃣ Ajouter les points au destinataire
-//   recipient.points += pointsToTransfer;
-//   recipient.pointstosend += pointsToSending;
-
-//   // 6️⃣ Ajouter notifications
-//   recipient.notifications.push({
-//     message: `${senderPseudo} أرسل إليك ${pointsToTransfer} نقطة.`,
-//     date: new Date(),
-//     isRead: false,
-//   });
-
-//   sender.notifications.push({
-//     message: `لقد أرسلت ${pointsToTransfer} نقطة إلى ${recipient.pseudo || "a user"}.`,
-//     date: new Date(),
-//     isRead: false,
-//   });
-
-//   // 7️⃣ Sauvegarder les changements
-//   await sender.save();
-//   await recipient.save();
-
-//   // 8️⃣ Mettre à jour les points du parent de l’expéditeur
-//   if (sender.parent) {
-//     await updateParentPoints(sender.parent);
-//   }
-
-//   res.status(200).json({ message: "Points transferred successfully" });
-// });
-
-
-
-
-// const transferPoints = async (req, res) => {
-//   try {
-//     const {
-//       senderPseudo,
-//       recipientId,
-//       pointsToTransfer,
-//       pointsToSending,
-//       password,
-//     } = req.body;
-
-//     // Find sender and recipient
-//     const sender = await User.findOne({ pseudo: senderPseudo });
-//     const recipient = await User.findById(recipientId);
-
-//     if (!sender || !recipient) {
-//       return res.status(404).json({ message: "Sender or recipient not found" });
-//     }
-
-//     // Verify password
-//     const isPasswordMatch = await sender.matchPassword(password);
-//     if (!isPasswordMatch) {
-//       return res.status(401).json({ message: "Incorrect password" });
-//     }
-
-//     // Check total available balance (sum of points + pointstosend)
-//     const totalAvailable = sender.points ;
-//     console.log(totalAvailable, 'totalAvailabletotalAvailabletotalAvailable');
-
-//     if (totalAvailable < pointsToTransfer) {
-//       return res
-//         .status(400)
-//         .json({ message: "رصيدك غير كافٍ لإتمام العملية!" });
-//     }
-
-//     // Deduct from pointstosend first, then from points if needed
-//     let remainingToDeduct = pointsToTransfer;
-
-//     if (sender.pointstosend >= remainingToDeduct) {
-//       sender.pointstosend -= remainingToDeduct;
-//       remainingToDeduct = 0;
-//     } else {
-//       remainingToDeduct -= sender.pointstosend;
-//       sender.pointstosend = 0;
-//     }
-
-//     if (remainingToDeduct > 0) {
-//       sender.points -= remainingToDeduct;
-//     }
-
-//     // Add points to the recipient
-//     recipient.points += pointsToTransfer;
-//     recipient.pointstosend += pointsToSending;
-
-//     // Add notifications
-//     recipient.notifications.push({
-//       message: `${senderPseudo} أرسل إليك ${pointsToTransfer} نقطة.`,
-//       date: new Date(),
-//       isRead: false,
-//     });
-
-//     sender.notifications.push({
-//       message: `لقد أرسلت ${pointsToTransfer} نقطة إلى ${recipient.pseudo || "a user"
-//         }.`,
-//       date: new Date(),
-//       isRead: false,
-//     });
-
-//     // Save both users
-//     await sender.save();
-//     await recipient.save();
-
-//     // Respond with success
-//     res.status(200).json({ message: "Points transferred successfully" });
-//   } catch (error) {
-//     console.error("Error transferring points:", error);
-//     res.status(500).json({ message: "Error transferring points" });
-//   }
-// };
 
 const logoutUser = asyncHandler(async (req, res) => {
   res.cookie("jwt", "", {
@@ -673,44 +485,11 @@ const getUserPoints = asyncHandler(async (req, res) => {
     throw new Error("لم يتم العثور على المستخدم");
   }
 });
-// const updateUserProfile = asyncHandler(async (req, res) => {
-//   const user = await User.findById(req.user._id);
-//   if (user) {
-//     user.nom = req.body.nom || user.nom;
-//     user.prenom = req.body.prenom || user.prenom;
-//     user.email = req.body.email || user.email;
-//     user.pseudo = req.body.pseudo || user.pseudo;
-//     user.tel = req.body.tel || user.tel;
-//     user.parent = req.body.parent || user.parent;
-//     user.leftChild = req.body.leftChild || user.leftChild;
-//     user.rightChild = req.body.rightChild || user.rightChild;
-//     user.position = req.body.position || user.position;
-//     user.password = req.body.password || user.password;
 
-//     if (req.body.password) {
-//       user.password = req.body.password;
-//     }
-
-//     const updatedUser = await user.save();
-
-//     res.json({
-//       _id: updatedUser._id,
-//       nom: updatedUser.nom,
-//       prenom: updatedUser.prenom,
-//       email: updatedUser.email,
-//       tel: updatedUser.tel,
-//       password: updatedUser.password,
-//     });
-//   } else {
-//     res.status(404);
-//     throw new Error("لم يتم العثور على المستخدم");
-//   }
-// });
 const updateUserProfile = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id);
   if (user) {
-    user.nom = req.body.nom || user.nom;
-    user.prenom = req.body.prenom || user.prenom;
+
     user.email = req.body.email || user.email;
     user.pseudo = req.body.pseudo || user.pseudo;
     user.tel = req.body.tel || user.tel;
@@ -724,17 +503,23 @@ const updateUserProfile = asyncHandler(async (req, res) => {
 
     res.json({
       _id: updatedUser._id,
-      nom: updatedUser.nom,
-      prenom: updatedUser.prenom,
+
       email: updatedUser.email,
       tel: updatedUser.tel,
       password: updatedUser.password,
+      PasswordFack: updatedUser.PasswordFack,
+
     });
   } else {
     res.status(404);
     throw new Error("لم يتم العثور على المستخدم");
   }
 });
+
+
+
+
+
 module.exports = {
   authUser,
   registerUser,
@@ -746,6 +531,7 @@ module.exports = {
   transferPoints,
   getTreeStats,
   getUserPoints,
-  getSolde
+  getSolde,
+
 };
 
