@@ -348,29 +348,42 @@ const getNotifications = asyncHandler(async (req, res) => {
 });
 
 const getSolde = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.user._id); // `req.user` is available due to `protect` middleware
-  // somme des soldes des notifications 
-  const totalTransfer = user.notifications.reduce((acc, notif) => {
-    return acc + (notif.solde * notif.sign);
-  }, 0);
-  const solde = totalTransfer + user.points;
+  const user = await User.findById(req.user._id);
+
   if (!user) {
     res.status(404);
     throw new Error("User not found");
   }
 
-  res.status(200).json({ solde: solde, points: user.points, totalTransfer: totalTransfer });
+  let solde;
+
+  if (user.role === "admin") {
+    // Admin : applique sign 1 (ajout) et -1 (retrait)
+    const totalTransfer = user.notifications.reduce((acc, notif) => {
+      return acc + notif.solde * notif.sign;
+    }, 0);
+
+    solde = user.points + totalTransfer;
+  } else {
+    // Utilisateur normal : seulement les envois (sign = -1)
+    const totalSent = user.notifications
+      .filter((notif) => notif.sign === -1)
+      .reduce((acc, notif) => acc + notif.solde, 0);
+
+    solde = user.points - totalSent;
+  }
+
+  res.status(200).json({
+    solde,
+    points: user.points,
+    notifications: user.notifications.length
+  });
 });
-
-
-
-
 
 
 const transferPoints = asyncHandler(async (req, res) => {
   const { senderPseudo, recipientId, pointsToTransfer, pointsToSending, password } = req.body;
 
-  // 🔹 Trouver expéditeur et destinataire
   const sender = await User.findOne({ pseudo: senderPseudo });
   const recipient = await User.findById(recipientId);
 
@@ -378,45 +391,26 @@ const transferPoints = asyncHandler(async (req, res) => {
     return res.status(404).json({ message: "Sender or recipient not found" });
   }
 
-  // 🔹 Vérifier mot de passe
   const isPasswordMatch = await sender.matchPassword(password);
   if (!isPasswordMatch) {
     return res.status(401).json({ message: "Incorrect password" });
   }
 
-  // 🔹 Calcul du solde réel dispo = points + somme des mouvements en notifications
-  // const totalTransfer = sender.notifications.reduce((acc, notif) => acc + (notif.solde || 0) * (notif.sign || 1), 0);
-  // const soldeDispo = sender.points + totalTransfer;
+  // Vérifier solde dispo avec getSolde logique (points + notifications)
+  const totalSent = sender.notifications
+    .filter((notif) => notif.sign === -1)
+    .reduce((acc, notif) => acc + notif.solde, 0);
 
-
-  const totalTransfer = sender.notifications.reduce((acc, notif) => {
-    return acc + (notif.solde * notif.sign);
-  }, 0);
-  const solde = totalTransfer + sender.points;
+  const solde = sender.points - totalSent;
   if (solde < pointsToTransfer) {
     return res.status(400).json({ message: "رصيدك غير كافٍ لإتمام العملية!" });
   }
 
-  // 🔹 Déduire des soldes existants (priorité à pointstosend comme avant)
-  let remainingToDeduct = pointsToTransfer;
-
-  if (sender.pointstosend >= remainingToDeduct) {
-    sender.pointstosend -= remainingToDeduct;
-    remainingToDeduct = 0;
-  } else {
-    remainingToDeduct -= sender.pointstosend;
-    sender.pointstosend = 0;
-  }
-
-  if (remainingToDeduct > 0) {
-    sender.points -= remainingToDeduct;
-  }
-
-  // 🔹 Ajouter points au destinataire
-  // recipient.points += pointsToTransfer;
+  // ✅ ne pas toucher à sender.points
+  // Ajouter au destinataire
   recipient.pointstosend += pointsToSending;
 
-  // 🔹 Ajouter notifications avec solde/sign comme ta 2ᵉ API
+  // Notifications
   sender.notifications.push({
     message: `لقد أرسلت ${pointsToTransfer} نقطة إلى ${recipient.pseudo || "utilisateur"}.`,
     date: new Date(),
@@ -433,7 +427,6 @@ const transferPoints = asyncHandler(async (req, res) => {
     sign: 1,
   });
 
-  // 🔹 Sauvegarder
   await sender.save();
   await recipient.save();
 
