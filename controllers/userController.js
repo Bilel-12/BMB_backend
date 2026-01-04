@@ -349,6 +349,7 @@ const getNotifications = asyncHandler(async (req, res) => {
 
 const getSolde = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id);
+  const INITIAL_SOLDE = -330;
 
   if (!user) {
     res.status(404);
@@ -363,14 +364,15 @@ const getSolde = asyncHandler(async (req, res) => {
       return acc + notif.solde * notif.sign;
     }, 0);
 
-    solde = user.points + totalTransfer;
+    // solde = user.points + totalTransfer;
+    solde = INITIAL_SOLDE + (user.points - totalSent);
   } else {
     // Utilisateur normal : seulement les envois (sign = -1)
     const totalSent = user.notifications
       .filter((notif) => notif.sign === -1)
       .reduce((acc, notif) => acc + notif.solde, 0);
 
-    solde = user.points - totalSent;
+    solde = INITIAL_SOLDE + (user.points - totalSent);
   }
 
   res.status(200).json({
