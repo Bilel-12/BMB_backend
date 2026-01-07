@@ -349,7 +349,7 @@ const getNotifications = asyncHandler(async (req, res) => {
 
 const getSolde = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id);
-  const INITIAL_SOLDE = -330;
+  const INITIAL_SOLDE = -400;
 
   if (!user) {
     res.status(404);
