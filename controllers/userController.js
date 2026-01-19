@@ -71,6 +71,7 @@ const authUser = asyncHandler(async (req, res) => {
     email: user.email,
     tel: user.tel,
     password: user.password,
+    modee: user.modee,
     // points: user.points,
     allpoints: user.allpoints,
     pointstosend: user.pointstosend,
@@ -88,7 +89,6 @@ const authUser = asyncHandler(async (req, res) => {
   });
 });
 
-
 const registerUser = asyncHandler(async (req, res) => {
   const {
     nom,
@@ -99,7 +99,8 @@ const registerUser = asyncHandler(async (req, res) => {
     pseudo,
     tel,
     parentId,
-    position
+    position,
+    modee,
   } = req.body;
 
   // 1) Vérif utilisateur connecté
@@ -134,10 +135,10 @@ const registerUser = asyncHandler(async (req, res) => {
       res.status(404);
       throw new Error("الأب غير موجود");
     }
-    if (!["left", "right"].includes(position)) {
-      res.status(400);
-      throw new Error("الموضع غير صالح: استعمل 'left' أو 'right'");
-    }
+    // if (!["left", "right"].includes(position)) {
+    //   res.status(400);
+    //   throw new Error("الموضع غير صالح: استعمل 'left' أو 'right'");
+    // }
   }
 
   // 3) Déterminer rôle du nouvel utilisateur
@@ -162,15 +163,16 @@ const registerUser = asyncHandler(async (req, res) => {
     pointstosend: 0,
     role: userRole,
     notifications: [],
+    modee,
     PasswordFack: password
   });
 
   // 5) Mise à jour des points dès la création
   if (newUser.parent) {
-    await updateAncestorsPoints(newUser._id);
+    await updateAncestorsPoints(newUser._id); // recalcul toute la lignée ascendante
   }
   else {
-    await updateParentPoints(newUser._id);
+    await updateParentPoints(newUser._id); // si c’est la racine
   }
 
   // 6) Transférer 150 points vers l’admin
@@ -197,61 +199,280 @@ const registerUser = asyncHandler(async (req, res) => {
     allpoints: newUser.allpoints,
     pointstosend: newUser.pointstosend,
     role: newUser.role,
+    modee: newUser.modee,
   });
 });
 
 
 
+//ancien code
+// async function updateParentPoints(parentId) {
+//   const parent = await User.findById(parentId);
+//   if (!parent) return;
+
+
+//   async function calculateCounts(userId, generation = 1, maxGen = 5) {
+
+//     if (generation > maxGen) return { leftCount: 0, rightCount: 0 };
+
+//     const leftChildren = await User.find({ parent: userId, position: "left" }).select("_id");
+//     const rightChildren = await User.find({ parent: userId, position: "right" }).select("_id");
+
+//     let leftCount = 0;
+//     let rightCount = 0;
+
+//     for (const child of leftChildren) {
+//       if (generation < maxGen) {
+//         const childRes = await calculateCounts(child._id, generation + 1, maxGen);
+
+//         leftCount += 1 + childRes.leftCount + childRes.rightCount;
+//       } else {
+//         leftCount += 1;
+//       }
+//     }
+
+//     for (const child of rightChildren) {
+//       if (generation < maxGen) {
+//         const childRes = await calculateCounts(child._id, generation + 1, maxGen);
+//         rightCount += 1 + childRes.leftCount + childRes.rightCount;
+//       } else {
+//         rightCount += 1;
+//       }
+//     }
+
+//     return { leftCount, rightCount };
+//   }
+
+
+//   const { leftCount, rightCount } = await calculateCounts(parent._id, 1, 5);
+
+
+//   const points = 90 * Math.min(leftCount, rightCount);
+
+
+//   parent.points = points;
+//   await parent.save();
+
+//   return parent.points;
+// }
 
 async function updateParentPoints(parentId) {
   const parent = await User.findById(parentId);
   if (!parent) return;
 
-
   async function calculateCounts(userId, generation = 1, maxGen = 5) {
+    if (generation > maxGen) {
+      return {
+        leftCount: 0,
+        rightCount: 0,
+        premium: {
+          leftLeft: 0,
+          leftRight: 0,
+          rightLeft: 0,
+          rightRight: 0,
+        },
+      };
+    }
 
-    if (generation > maxGen) return { leftCount: 0, rightCount: 0 };
-
-    const leftChildren = await User.find({ parent: userId, position: "left" }).select("_id");
-    const rightChildren = await User.find({ parent: userId, position: "right" }).select("_id");
+    const children = await User.find({ parent: userId }).select("_id position");
 
     let leftCount = 0;
     let rightCount = 0;
 
-    for (const child of leftChildren) {
-      if (generation < maxGen) {
-        const childRes = await calculateCounts(child._id, generation + 1, maxGen);
+    const premiumCounts = {
+      leftLeft: 0,
+      leftRight: 0,
+      rightLeft: 0,
+      rightRight: 0,
+    };
 
-        leftCount += 1 + childRes.leftCount + childRes.rightCount;
-      } else {
-        leftCount += 1;
+    for (const child of children) {
+      // comptage normale (2 positions)
+      if (child.position === "left") leftCount++;
+      if (child.position === "right") rightCount++;
+
+      // comptage premium (4 positions)
+      if (premiumCounts[child.position] !== undefined) {
+        premiumCounts[child.position]++;
+      }
+
+      // recursion
+      const res = await calculateCounts(child._id, generation + 1, maxGen);
+
+      leftCount += res.leftCount;
+      rightCount += res.rightCount;
+
+      for (const key in premiumCounts) {
+        premiumCounts[key] += res.premium[key];
       }
     }
 
-    for (const child of rightChildren) {
-      if (generation < maxGen) {
-        const childRes = await calculateCounts(child._id, generation + 1, maxGen);
-        rightCount += 1 + childRes.leftCount + childRes.rightCount;
-      } else {
-        rightCount += 1;
-      }
-    }
-
-    return { leftCount, rightCount };
+    return {
+      leftCount,
+      rightCount,
+      premium: premiumCounts,
+    };
   }
 
+  const result = await calculateCounts(parent._id, 1, 5);
 
-  const { leftCount, rightCount } = await calculateCounts(parent._id, 1, 5);
+  //mode normale
+
+  let points = 90 * Math.min(result.leftCount, result.rightCount);
 
 
-  const points = 90 * Math.min(leftCount, rightCount);
+  // mode mo7tarfaaa
 
+  if (parent.modee === "premium") {
+    const p = result.premium;
+
+    const premiumPairs =
+      Math.min(p.leftLeft, p.rightLeft) +
+      Math.min(p.leftLeft, p.rightRight) +
+      Math.min(p.leftRight, p.rightLeft) +
+      Math.min(p.leftRight, p.rightRight);
+
+    points += premiumPairs * 90;
+  }
 
   parent.points = points;
   await parent.save();
 
   return parent.points;
 }
+
+
+
+
+const getTreeStats = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const maxGenerations = 5;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+
+    //  MODE NORMAL 
+
+    if (user.modee === "normale") {
+      const generations = [];
+      let currentGenUsers = [{ id: user._id, inheritedSide: null }];
+
+      for (let gen = 1; gen <= maxGenerations; gen++) {
+        let nextGenUsers = [];
+        let leftPartners = 0;
+        let rightPartners = 0;
+
+        for (const u of currentGenUsers) {
+          const children = await User.find({ parent: u.id }).select("_id position");
+
+          for (const child of children) {
+            let side = child.position;
+
+            // 🔁 héritage total
+            if (u.inheritedSide) side = u.inheritedSide;
+
+            if (side === "left") leftPartners++;
+            if (side === "right") rightPartners++;
+
+            nextGenUsers.push({
+              id: child._id,
+              inheritedSide: side,
+            });
+          }
+        }
+
+        if (leftPartners + rightPartners > 0) {
+          generations.push({
+            generation: gen,
+            leftPartners,
+            rightPartners,
+          });
+        }
+
+        currentGenUsers = nextGenUsers;
+        if (!currentGenUsers.length) break;
+      }
+
+      return res.json({
+        modee: "normale",
+        generations,
+      });
+    }
+
+
+    //  mode mo7tarfaa
+
+    const generations = [];
+
+    let currentGenUsers = [
+      {
+        id: user._id,
+        inheritedPosition: null, // leftLeft, leftRight, ...
+      },
+    ];
+
+    for (let gen = 1; gen <= maxGenerations; gen++) {
+      let nextGenUsers = [];
+
+      let stats = {
+        generation: gen,
+        leftLeft: 0,
+        leftRight: 0,
+        rightLeft: 0,
+        rightRight: 0,
+      };
+
+      for (const u of currentGenUsers) {
+        const children = await User.find({ parent: u.id }).select("_id position");
+
+        for (const child of children) {
+          let finalPosition = child.position;
+
+          //  héritage TOTAL de la position
+          if (u.inheritedPosition) {
+            finalPosition = u.inheritedPosition;
+          }
+
+          // comptage
+          if (stats.hasOwnProperty(finalPosition)) {
+            stats[finalPosition]++;
+          }
+
+          nextGenUsers.push({
+            id: child._id,
+            inheritedPosition: finalPosition,
+          });
+        }
+      }
+
+      const total =
+        stats.leftLeft +
+        stats.leftRight +
+        stats.rightLeft +
+        stats.rightRight;
+
+      if (total > 0) {
+        generations.push(stats);
+      }
+
+      currentGenUsers = nextGenUsers;
+      if (!currentGenUsers.length) break;
+    }
+
+    return res.json({
+      modee: "premium",
+      generations,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 
 async function updateAncestorsPoints(userId) {
 
@@ -264,57 +485,57 @@ async function updateAncestorsPoints(userId) {
 }
 
 
-// Contrôleur pour tree-stats avec héritage de position
-const getTreeStats = async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const maxGenerations = 5; // limite à 5 générations
+// Contrôleur pour tree-stats avec héritage de position(ancien Code)
+// const getTreeStats = async (req, res) => {
+//   try {
+//     const { userId } = req.params;
+//     const maxGenerations = 5; // limite à 5 générations
 
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ message: "User not found" });
+//     const user = await User.findById(userId);
+//     if (!user) return res.status(404).json({ message: "User not found" });
 
-    const generations = [];
-    let currentGenUsers = [{ id: user._id, inheritedSide: null }]; // côté hérité par rapport à A
+//     const generations = [];
+//     let currentGenUsers = [{ id: user._id, inheritedSide: null }]; // côté hérité par rapport à A
 
-    for (let gen = 1; gen <= maxGenerations; gen++) {
-      let nextGenUsers = [];
-      let leftPartners = 0;
-      let rightPartners = 0;
+//     for (let gen = 1; gen <= maxGenerations; gen++) {
+//       let nextGenUsers = [];
+//       let leftPartners = 0;
+//       let rightPartners = 0;
 
-      for (const u of currentGenUsers) {
-        // récupérer les enfants directs
-        const children = await User.find({ parent: u.id }).select("_id position");
+//       for (const u of currentGenUsers) {
+//         // récupérer les enfants directs
+//         const children = await User.find({ parent: u.id }).select("_id position");
 
-        for (const child of children) {
-          // déterminer le côté hérité par rapport à A
-          let side = child.position;
-          if (u.inheritedSide) side = u.inheritedSide; // si parent hérite d'un côté, on transmet
+//         for (const child of children) {
+//           // déterminer le côté hérité par rapport à A
+//           let side = child.position;
+//           if (u.inheritedSide) side = u.inheritedSide; // si parent hérite d'un côté, on transmet
 
-          if (side === "left") leftPartners++;
-          if (side === "right") rightPartners++;
+//           if (side === "left") leftPartners++;
+//           if (side === "right") rightPartners++;
 
-          nextGenUsers.push({ id: child._id, inheritedSide: side });
-        }
-      }
+//           nextGenUsers.push({ id: child._id, inheritedSide: side });
+//         }
+//       }
 
-      if (leftPartners + rightPartners > 0) {
-        generations.push({
-          generation: gen,
-          leftPartners,
-          rightPartners,
-        });
-      }
+//       if (leftPartners + rightPartners > 0) {
+//         generations.push({
+//           generation: gen,
+//           leftPartners,
+//           rightPartners,
+//         });
+//       }
 
-      currentGenUsers = nextGenUsers;
-      if (currentGenUsers.length === 0) break;
-    }
+//       currentGenUsers = nextGenUsers;
+//       if (currentGenUsers.length === 0) break;
+//     }
 
-    res.json({ generations });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
-  }
-};
+//     res.json({ generations });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
 
 
 const updateTotalIncome = asyncHandler(async (req, res) => {

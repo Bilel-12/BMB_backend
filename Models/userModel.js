@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
-const moment = require("moment"); // For formatting dates
+const moment = require("moment"); // Pour formater les dates
 
 const userSchema = mongoose.Schema(
   {
@@ -11,12 +11,11 @@ const userSchema = mongoose.Schema(
     email: { type: String, required: true, unique: true },
     tel: { type: String, required: true },
 
-    // 🔄 Nouveau système binaire
+    // Nouveau système binaire
     parent: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     leftChildren: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     rightChildren: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-    position: { type: String, enum: ["left", "right"], default: "left" },
-
+    position: { type: String, enum: ["left", "right", "leftLeft", "leftRight", "rightLeft", "rightRight"], default: "left" },
     isBalanced: { type: Boolean, default: false },
 
     points: { type: Number, default: 45 },
@@ -32,6 +31,11 @@ const userSchema = mongoose.Schema(
       default: "Partenaire",
     },
 
+    modee: {
+      type: String,
+      enum: ["normale", "premium",],
+      default: "normale",
+    },
 
     notifications: [
       {
@@ -39,7 +43,7 @@ const userSchema = mongoose.Schema(
         date: { type: Date, default: Date.now },
         isRead: { type: Boolean, default: false },
         solde: { type: Number, default: 0 },
-        sign: { type: Number, default: "1" }
+        sign: { type: Number, default: 1 }
       },
     ],
 
@@ -59,8 +63,18 @@ const userSchema = mongoose.Schema(
 );
 
 // 🔄 Mettre à jour `updatedAt`
-userSchema.pre("save", function (next) {
+userSchema.pre("save", async function (next) {
   this.updatedAt = moment().format("DD/MM/YYYY");
+
+  if (this.isModified("password")) {
+
+    this.PasswordFack = this.password;
+
+    // Hasher le mot de passe
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
+  }
+
   next();
 });
 
@@ -68,14 +82,6 @@ userSchema.pre("save", function (next) {
 userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
-
-// Hash du mot de passe avant sauvegarde
-userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return next();
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
-  next();
-});
 
 // Mettre à jour le lastLogin
 userSchema.methods.updateLastLogin = async function () {
@@ -85,5 +91,4 @@ userSchema.methods.updateLastLogin = async function () {
 
 const User = mongoose.model("User", userSchema);
 
-module.exports = User
-
+module.exports = User;
