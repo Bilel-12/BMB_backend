@@ -570,14 +570,21 @@ const getNotifications = asyncHandler(async (req, res) => {
 
 const getSolde = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id);
-  const INITIAL_SOLDE = -400;
-
   if (!user) {
     res.status(404);
     throw new Error("User not found");
   }
 
+  // mode
+  let INITIAL_SOLDE;
+  if (user.modee === "premium") {
+    INITIAL_SOLDE = -1500;
+  } else {
+    INITIAL_SOLDE = -400;
+  }
+
   let solde;
+
 
   if (user.role === "admin") {
     // Admin : applique sign 1 (ajout) et -1 (retrait)
@@ -585,8 +592,7 @@ const getSolde = asyncHandler(async (req, res) => {
       return acc + notif.solde * notif.sign;
     }, 0);
 
-    // solde = user.points + totalTransfer;
-    solde = INITIAL_SOLDE + (user.points - totalSent);
+    solde = INITIAL_SOLDE + (user.points + totalTransfer);
   } else {
     // Utilisateur normal : seulement les envois (sign = -1)
     const totalSent = user.notifications
