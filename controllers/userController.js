@@ -560,7 +560,7 @@ const getTreeStats = async (req, res) => {
 
           // Points pour le parent direct (génération actuelle)
           if (parent.modee === "premium") {
-            generationStats[gen - 1][finalPosition] += child.modee === "premium" ? 3 : 1;
+            generationStats[gen - 1][finalPosition] += child.modee === "premium" ? 2 : 1;
           } else {
             generationStats[gen - 1][finalPosition] += 1;
           }
@@ -569,7 +569,7 @@ const getTreeStats = async (req, res) => {
           for (let i = 0; i < u.premiumAncestors.length; i++) {
             const ancestorGen = gen - (i + 1) - 1;
             if (ancestorGen >= 0) {
-              generationStats[ancestorGen][finalPosition] += 3;
+              generationStats[ancestorGen][finalPosition] += 2;
             }
           }
 
